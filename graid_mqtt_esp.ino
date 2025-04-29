@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
+#include <Ticker.h>
 
 // Create server on port 80
 AsyncWebServer server(80);
@@ -31,6 +32,9 @@ const char* mqtt_topic_pub_status = "esp32/status";
 // Secure client
 WiFiClientSecure secureClient;
 PubSubClient client(secureClient);
+
+
+bool isScanning = false;
 
 
 void setup_wifi() {
@@ -267,7 +271,7 @@ void connectToWiFi(const char* ssid, const char* password) {
   Serial.println("Connecting to WiFi...");
 
   WiFi.softAPdisconnect(true); // stop AP mode
-  delay(100);
+  delay(1000);
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
@@ -296,6 +300,7 @@ void connectToWiFi(const char* ssid, const char* password) {
   }
 }
 
+
 void setup() {
   Serial.begin(115200);
 
@@ -307,11 +312,66 @@ void setup() {
   Serial.println("LittleFS mounted successfully");
 
   // Start Access Point
+  WiFi.mode(WIFI_AP_STA);  // explicitly set AP mode
   WiFi.softAP(ap_ssid, ap_password);
   Serial.println("Access Point Started");
 
-  // Serve static files
-  server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
+  // Serve Bootstrap CSS file
+  server.on("/bootstrap/bootstrap.min.css", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(LittleFS, "/bootstrap/bootstrap.min.css", "text/css");
+  });
+
+  // Serve Bootstrap JS file
+  server.on("/bootstrap/bootstrap.bundle.min.js", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(LittleFS, "/bootstrap/bootstrap.bundle.min.js", "text/javascript");
+  });
+
+  // Serve HTML file
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(LittleFS, "/index.html", "text/html");
+  });
+
+  server.on("/get-wifi-list", HTTP_GET, [](AsyncWebServerRequest *request){
+    if (isScanning) {
+      request->send(503, "application/json", "{\"error\":\"Scan in progress\"}");
+      return;
+    }
+
+    isScanning = true;
+    WiFi.scanNetworks(true); // start async scan
+
+    // Delay the response until scan is complete
+    request->onDisconnect([request]() {
+      // nothing needed here for now
+    });
+
+    // Check back later using a lambda + timer
+    AsyncWebServerRequest* thisRequest = request;
+    static unsigned long startTime = millis();
+
+    // Use a timer to check when the scan is done
+    AsyncTimer.setInterval(500, [thisRequest]() {
+      int scanComplete = WiFi.scanComplete();
+      if (scanComplete == WIFI_SCAN_RUNNING) {
+        return true; // wait more
+      }
+
+      String result = "[";
+      if (scanComplete > 0) {
+        for (int i = 0; i < scanComplete; ++i) {
+          result += "\"" + WiFi.SSID(i) + "\"";
+          if (i < scanComplete - 1) {
+            result += ",";
+          }
+        }
+      }
+      result += "]";
+      thisRequest->send(200, "application/json", result);
+      WiFi.scanDelete();
+      isScanning = false;
+      return false; // stop the timer
+    });
+  });
 
   server.on("/connect", HTTP_POST, [](AsyncWebServerRequest *request){
   String ssid, password;
@@ -334,6 +394,8 @@ void setup() {
 
   // Start web server
   server.begin();
+
+  Serial.println("Server started!");
 
   secureClient.setInsecure(); // ⚠️ For test only; add cert for production
   client.setServer(mqtt_server, mqtt_port);

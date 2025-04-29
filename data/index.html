@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wi-Fi Connections</title>
+    <!-- Include Bootstrap CSS -->
+    <link href="/bootstrap/bootstrap.min.css" rel="stylesheet">
+    <style>
+        #wifi-list {
+            overflow-y: scroll;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm fixed-top">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="#">🌱 Graid Connection Page</a>
+        </div>
+    </nav>
+
+    <div class="d-flex justify-content-center align-items-center vh-100 ps-2 pe-2">
+        <div class="d-flex relative shadow col-xl-4 col-md-6 col-10" style="height: 75vh; overflow: hidden; position: relative;">
+            <div class="card h-100 w-100" id="card1">
+                <div class="card-body"> 
+                    <h3 class="card-title text-center">Connect to Wifi</h3>
+                    <div class="">
+                        <h5 class="">Available Wi-Fi Networks</h5>
+                        <ul id="wifi-list" class="list-group mt-3" style="max-height: 50vh; overflow-y: auto;">
+                            <!-- Wi-Fi list items will be dynamically added here -->
+                        </ul>
+                    </div>               
+                </div>
+                <div class="card-footer">
+                    <button class="btn btn-primary" onclick="fetchWifiList()">Refresh</button>
+                </div>
+            </div>
+        
+            <div class="card h-100 w-100" id="card2" style="position: absolute; top: 0; right: -100%; transition: right 0.5s; z-index: 1000;">
+                <div class="card-body"> 
+                    <h3 class="card-title">Wi-Fi Details</h3>
+                    <div class="">
+                        <div id="password-section" >
+                            <label for="wifi-name" class="form-label">Wi-Fi Name</label>
+                            <input type="text" id="wifi-name" class="form-control mb-3" placeholder="Wi-Fi Name" readonly>
+                            <label for="wifi-password" class="form-label">Enter Password</label>
+                            <input type="password" id="wifi-password" class="form-control mb-3" placeholder="Wi-Fi Password">
+                            <button class="btn btn-primary" onclick="connectToWifi()">Connect</button>
+                        </div>
+                    </div>               
+                </div>
+                <div class="card-footer">
+                    <button class="btn btn-secondary" onclick="closeCard()">Back</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+
+        // Function to fetch Wi-Fi list every 2 seconds
+        async function fetchWifiList()  {
+            try {
+                // const response = await fetch('https://680fcfc727f2fdac240f7884.mockapi.io/api/get-wifi-list'); // Replace with your server endpoint
+                const response = await fetch('http://192.168.4.1/get-wifi-list');
+                const wifiList = await response.json();
+                const wifiListContainer = document.getElementById('wifi-list');
+                wifiListContainer.innerHTML = ''; // Clear the list
+                wifiList.forEach(wifi => {
+                    const listItem = document.createElement('li');
+                    listItem.className = 'list-group-item list-group-item-action';
+                    listItem.textContent = wifi.name; // Assuming the server sends an array of objects with a 'name' property
+                    listItem.onclick = () => {};
+                    wifiListContainer.appendChild(listItem);
+                });
+            } catch (error) {
+                console.error('Error fetching Wi-Fi list:', error);
+            }
+        }
+
+        // Start fetching Wi-Fi list when the page loads
+        window.onload = fetchWifiList;
+
+        // Function to handle Wi-Fi connection
+        async function connectToWifi()  {
+            const password = document.getElementById('wifi-password').value;
+            if (password) {
+                
+                const response = await fetch('http://192.168.4.1:80/connect', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ password }) // Send the password to the server
+                });
+                if (response.ok) {
+                    alert('Connected to Wi-Fi successfully!');
+                } else {
+                    alert('Failed to connect to Wi-Fi. Please try again.');
+                }
+                // Add logic to send the password to the server for connection
+            } else {
+                alert('Please enter a password.');
+            }
+        }
+
+
+        // Function to handle Wi-Fi list item click
+        function showDetails(wifiName) {
+            const detailsCard = document.getElementById('card2');
+            const wifiNameInput = document.getElementById('wifi-name');
+            wifiNameInput.value = wifiName; // Set the Wi-Fi name in the input field
+            detailsCard.style.right = '0'; // Slide in the second card
+        }
+    
+        // Function to close the details card
+        function closeCard() {
+            const detailsCard = document.getElementById('card2');
+            detailsCard.style.right = '-100%'; // Slide out the second card
+        }
+    
+        // Example: Adding click event to dynamically created list items
+        document.getElementById('wifi-list').addEventListener('click', (event) => {
+            if (event.target.tagName === 'LI') {
+                showDetails(event.target.textContent);
+            }
+        });
+    </script>
+    <!-- Include Bootstrap JS -->
+    <script src="/bootstrap/bootstrap.bundle.min.js"></script>
+</body>
+</html>
