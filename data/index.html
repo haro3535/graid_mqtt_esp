@@ -69,7 +69,7 @@
                 wifiList.forEach(wifi => {
                     const listItem = document.createElement('li');
                     listItem.className = 'list-group-item list-group-item-action';
-                    listItem.textContent = wifi.name; // Assuming the server sends an array of objects with a 'name' property
+                    listItem.textContent = wifi; // Assuming the server sends an array of objects with a 'name' property
                     listItem.onclick = () => {};
                     wifiListContainer.appendChild(listItem);
                 });
@@ -79,10 +79,11 @@
         }
 
         // Start fetching Wi-Fi list when the page loads
-        window.onload = fetchWifiList;
+        //window.onload = fetchWifiList;
 
         // Function to handle Wi-Fi connection
         async function connectToWifi()  {
+            const ssid = document.getElementById('wifi-name').value; // Get the Wi-Fi name from the input field
             const password = document.getElementById('wifi-password').value;
             if (password) {
                 
@@ -91,7 +92,7 @@
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ password }) // Send the password to the server
+                    body: JSON.stringify({ ssid, password }) // Send the password to the server
                 });
                 if (response.ok) {
                     alert('Connected to Wi-Fi successfully!');

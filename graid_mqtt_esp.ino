@@ -8,20 +8,26 @@
 
 // Create server on port 80
 AsyncWebServer server(80);
+Ticker scanCheckTicker;
+
+
+bool isScanning = false;
+AsyncWebServerRequest* pendingRequest = nullptr;
 
 // AP credentials
 const char* ap_ssid = "ESP32Graid";
 const char* ap_password = "esp32graid"; // optional, can be open
+bool isApStarted = false;
 
 // Replace with your network credentials
 char* ssid = "";
 char* password = "";
 
 // HiveMQ Cloud credentials
-const char* mqtt_server = "233cb4a43c2b4783bf56cb1bcb15581b.s1.eu.hivemq.cloud";
+const char* mqtt_server = "a6faa28a33914e9bba541e6ec9da0741.s1.eu.hivemq.cloud";
 const int mqtt_port = 8883;
-const char* mqtt_user = "deneme";
-const char* mqtt_password = "Deneme123!";
+const char* mqtt_user = "boztepe";
+const char* mqtt_password = "Deneme123";
 
 // MQTT topics
 const char* mqtt_topic_sub = "esp32/command";
@@ -34,8 +40,70 @@ WiFiClientSecure secureClient;
 PubSubClient client(secureClient);
 
 
-bool isScanning = false;
+void setupWebServer() {
 
+  // Serve Bootstrap CSS file
+  server.on("/bootstrap/bootstrap.min.css", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(LittleFS, "/bootstrap/bootstrap.min.css", "text/css");
+  });
+
+  // Serve Bootstrap JS file
+  server.on("/bootstrap/bootstrap.bundle.min.js", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(LittleFS, "/bootstrap/bootstrap.bundle.min.js", "text/javascript");
+  });
+
+  // Serve HTML file
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(LittleFS, "/index.html", "text/html");
+  });
+
+  server.on("/get-wifi-list", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (isScanning) {
+      request->send(503, "application/json", "{\"error\":\"Scan in progress\"}");
+      return;
+    }
+
+    isScanning = true;
+    pendingRequest = request;
+    WiFi.scanNetworks(true); // Start async scan
+
+    // Periodically check scan status every 500 ms
+    scanCheckTicker.attach_ms(500, checkWifiScanStatus);
+  });
+
+  server.on("/connect", HTTP_POST, [](AsyncWebServerRequest *request) {
+  // This will be empty; body is handled below
+  }, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+    StaticJsonDocument<256> jsonDoc;
+    DeserializationError error = deserializeJson(jsonDoc, data);
+
+    if (error) {
+      Serial.println("JSON parse failed!");
+      request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+      return;
+    }
+
+    String ssid = jsonDoc["ssid"] | "";
+    String password = jsonDoc["password"] | "";
+
+    if (ssid == "") {
+      Serial.println("Burada");
+      request->send(400, "application/json", "{\"error\":\"SSID is required\"}");
+      return;
+    }
+
+    Serial.println("Received SSID: " + ssid);
+    Serial.println("Received Password: " + password);
+
+    connectToWiFi(ssid.c_str(), password.c_str());
+    request->send(200, "application/json", "{\"status\":\"Connecting...\"}");
+  });
+
+  // Start Server
+  server.begin();
+
+  Serial.println("Server started!");
+}
 
 void setup_wifi() {
   delay(10);
@@ -50,8 +118,16 @@ void setup_wifi() {
   Serial.println("WiFi connected");
 }
 
+unsigned long lastReconnectAttempt = 0;
+const unsigned long reconnectInterval = 5000; // Try every 5 seconds
+
 void reconnect() {
-  while (!client.connected()) {
+  if (WiFi.status() != WL_CONNECTED || client.connected()) return;
+
+  unsigned long now = millis();
+  if (now - lastReconnectAttempt >= reconnectInterval) {
+    lastReconnectAttempt = now;
+
     Serial.print("Connecting to MQTT...");
 
     String clientId = "ESP32Client-";
@@ -63,8 +139,7 @@ void reconnect() {
       client.publish(mqtt_topic_pub_status, "ESP32 is online");
     } else {
       Serial.print("failed, rc=");
-      Serial.print(client.state());
-      delay(5000);
+      Serial.println(client.state());
     }
   }
 }
@@ -89,10 +164,34 @@ void callback(char* topic, byte* payload, unsigned int length) {
     float humidity = 60.0;
 
     // Create JSON-style message
-    String response = "{ \"temp\": " + String(temp) + ", \"humidity\": " + String(humidity) + " }";
-    //String response = handleMeasurementsRequest();
-
+    //String response = "{ \"temp\": " + String(temp) + ", \"humidity\": " + String(humidity) + " }";
+    String response = handleMeasurementsRequest();
+    
     client.publish(mqtt_topic_pub_measurements, response.c_str());
+    Serial.println("Measurements sent!");
+  }
+
+  if (message == "esp-status") {
+    client.publish(mqtt_topic_pub_status, "ESP32 is online!");
+  }
+
+  if (message == "getMockData") {
+
+    // Create JSON object
+    StaticJsonDocument<200> jsonDoc;
+    jsonDoc["nitrogen"] = 0.09;
+    jsonDoc["phosphorus"] = 5.6;
+    jsonDoc["potassium"] = 170;
+    jsonDoc["temperature"] = 23.5;
+    jsonDoc["ec"] = 0.005;
+    jsonDoc["ph"] = 7.65;
+    jsonDoc["soilMoisture"] = 60.2;
+
+    // Convert JSON to string
+    String jsonResponse;
+    serializeJson(jsonDoc, jsonResponse);
+
+    client.publish(mqtt_topic_pub_measurements, jsonResponse.c_str());
   }
 }
 
@@ -270,34 +369,65 @@ int hexPairToDecimalByIndex(String hexString, int highIndex, int lowIndex) {
 void connectToWiFi(const char* ssid, const char* password) {
   Serial.println("Connecting to WiFi...");
 
-  WiFi.softAPdisconnect(true); // stop AP mode
-  delay(1000);
+  WiFi.softAPdisconnect(true);
+  delay(100);  // küçük bekleme
 
-  WiFi.mode(WIFI_STA);
+  // WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
 
-  int tryCount = 0;
-  while (WiFi.status() != WL_CONNECTED && tryCount < 20) { // Try for ~10 seconds
-    delay(500);
+  unsigned long startAttemptTime = millis();
+  const unsigned long timeout = 10000; // 10 seconds max
+
+  while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < timeout) {
+    delay(100);  // Küçük delay ile watchdog'u rahatlat
     Serial.print(".");
-    tryCount++;
+    yield(); // <-- Watchdog'u resetler
   }
 
-  if(WiFi.status() == WL_CONNECTED){
+  if (WiFi.status() == WL_CONNECTED) {
     Serial.println("\nConnected to WiFi!");
     Serial.print("IP address: ");
     Serial.println(WiFi.localIP());
+    isApStarted = false;
 
-    // Now you can connect to MQTT broker
-    reconnect();
-  }
-  else {
+    server.end(); // 👈 Stop web server here
+    Serial.println("Server stopped!");
+
+    reconnect(); // MQTT bağlantısı
+  } else {
     Serial.println("\nFailed to connect to WiFi");
-    // Optional: Restart Access Point mode again
-    // Start Access Point
     WiFi.softAP(ap_ssid, ap_password);
     Serial.println("Access Point Started");
+    isApStarted = true;
   }
+}
+
+void checkWifiScanStatus() {
+  int scanStatus = WiFi.scanComplete();
+
+  if (scanStatus == WIFI_SCAN_RUNNING) {
+    return; // Still scanning, wait more
+  }
+
+  String result = "[";
+  if (scanStatus > 0) {
+    for (int i = 0; i < scanStatus; ++i) {
+      result += "\"" + WiFi.SSID(i) + "\"";
+      if (i < scanStatus - 1) {
+        result += ",";
+      }
+    }
+  }
+  result += "]";
+
+  if (pendingRequest != nullptr) {
+    pendingRequest->send(200, "application/json", result);
+    pendingRequest = nullptr;
+  }
+
+  WiFi.scanDelete();
+  isScanning = false;
+  scanCheckTicker.detach(); // Stop the periodic check
 }
 
 
@@ -315,87 +445,10 @@ void setup() {
   WiFi.mode(WIFI_AP_STA);  // explicitly set AP mode
   WiFi.softAP(ap_ssid, ap_password);
   Serial.println("Access Point Started");
-
-  // Serve Bootstrap CSS file
-  server.on("/bootstrap/bootstrap.min.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(LittleFS, "/bootstrap/bootstrap.min.css", "text/css");
-  });
-
-  // Serve Bootstrap JS file
-  server.on("/bootstrap/bootstrap.bundle.min.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(LittleFS, "/bootstrap/bootstrap.bundle.min.js", "text/javascript");
-  });
-
-  // Serve HTML file
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(LittleFS, "/index.html", "text/html");
-  });
-
-  server.on("/get-wifi-list", HTTP_GET, [](AsyncWebServerRequest *request){
-    if (isScanning) {
-      request->send(503, "application/json", "{\"error\":\"Scan in progress\"}");
-      return;
-    }
-
-    isScanning = true;
-    WiFi.scanNetworks(true); // start async scan
-
-    // Delay the response until scan is complete
-    request->onDisconnect([request]() {
-      // nothing needed here for now
-    });
-
-    // Check back later using a lambda + timer
-    AsyncWebServerRequest* thisRequest = request;
-    static unsigned long startTime = millis();
-
-    // Use a timer to check when the scan is done
-    AsyncTimer.setInterval(500, [thisRequest]() {
-      int scanComplete = WiFi.scanComplete();
-      if (scanComplete == WIFI_SCAN_RUNNING) {
-        return true; // wait more
-      }
-
-      String result = "[";
-      if (scanComplete > 0) {
-        for (int i = 0; i < scanComplete; ++i) {
-          result += "\"" + WiFi.SSID(i) + "\"";
-          if (i < scanComplete - 1) {
-            result += ",";
-          }
-        }
-      }
-      result += "]";
-      thisRequest->send(200, "application/json", result);
-      WiFi.scanDelete();
-      isScanning = false;
-      return false; // stop the timer
-    });
-  });
-
-  server.on("/connect", HTTP_POST, [](AsyncWebServerRequest *request){
-  String ssid, password;
-
-  if (request->hasParam("ssid", true)) {
-    ssid = request->getParam("ssid", true)->value();
-  }
-  if (request->hasParam("password", true)) {
-    password = request->getParam("password", true)->value();
-  }
-
-  Serial.println("Received SSID: " + ssid);
-  Serial.println("Received Password: " + password);
-
-  // Now attempt to connect
-  connectToWiFi(ssid.c_str(), password.c_str());
-
-  request->send(200, "text/plain", "Trying to connect...");
-  });
-
-  // Start web server
-  server.begin();
-
-  Serial.println("Server started!");
+  isApStarted = true;
+  
+  setupWebServer();
+  
 
   secureClient.setInsecure(); // ⚠️ For test only; add cert for production
   client.setServer(mqtt_server, mqtt_port);
@@ -405,9 +458,18 @@ void setup() {
 
 void loop() {
   if (WiFi.status() == WL_CONNECTED) {
-    if (!client.connected()) {
-      reconnect();
-    }
+    reconnect();
     client.loop();
+  }
+  else {
+    if (!isApStarted) {
+      Serial.println("WiFi disconnected. Starting AP mode...");
+      WiFi.mode(WIFI_AP);
+      WiFi.softAP(ap_ssid, ap_password);
+      isApStarted = true;
+
+      // Re-register handlers (in case server was stopped)
+      setupWebServer(); // Move your `server.on(...)` code here
+    }
   }
 }
