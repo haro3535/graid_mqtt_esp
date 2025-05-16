@@ -193,6 +193,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
     client.publish(mqtt_topic_pub_measurements, jsonResponse.c_str());
   }
+
 }
 
 String handleHexRequest(String hexStr) {
@@ -275,44 +276,29 @@ String handleMeasurementsRequest() {
   double K = 0.0;  
 
   for (int stringIndex = 0; stringIndex < 6; stringIndex++) {
-
-    int len = requestStrings[stringIndex].length();
-    for (int i = 0; i < len;) {
-      while (i < len && requestStrings[stringIndex][i] == ' ') i++; // skip spaces
-
-        if (i + 1 < len) {
-          String byteStr = requestStrings[stringIndex].substring(i, i + 2);
-          uint8_t byteVal = (uint8_t) strtol(byteStr.c_str(), NULL, 16);
-          Serial2.write(byteVal); // Send to RS485 via TTL
-          i += 2;
-        } else {
-          break;
-      }
-    }
-
-    // Wait a bit for response
-    delay(100);  // Or use millis() for non-blocking
-
-    // Read available response
-    String responseHex = "";
-    while (Serial2.available()) {
-      uint8_t byteIn = Serial2.read();
-      char hexPart[4]; // Enough for 2 hex chars + space + null
-      sprintf(hexPart, "%02X ", byteIn);
-      responseHex += hexPart;
-    }
+    
+    String responseHex = sendAndReceiveHex(requestStrings[stringIndex]);
+    Serial.println("Response: " + responseHex);
 
     if (stringIndex == 0) // Temp ve Humidity (/10)
     {
+      Serial.println("Debug6");
       temp = ((double) hexPairToDecimalByIndex(responseHex, 3, 4)) / 10.0;
       humidity = ((double) hexPairToDecimalByIndex(responseHex, 5, 6)) / 10.0;
+    }
+    else if (stringIndex == 1) { // EC
+      ec = (double) hexPairToDecimalByIndex(responseHex, 3, 4);
     }
     else if (stringIndex == 2) { // pH (/100)
       pH = ((double) hexPairToDecimalByIndex(responseHex, 3, 4)) / 100.0;
     }
-    else { // EC, NPK (same)
+    else if (stringIndex == 3) { // Nitrogen
       N = (double) hexPairToDecimalByIndex(responseHex, 3, 4);
+    }
+    else if (stringIndex == 4) { // Phosphorus
       P = (double) hexPairToDecimalByIndex(responseHex, 3, 4);
+    }
+    else if (stringIndex == 5) { // Potassium
       K = (double) hexPairToDecimalByIndex(responseHex, 3, 4);
     }
 
@@ -321,8 +307,11 @@ String handleMeasurementsRequest() {
     Serial.println(K);
     Serial.println(temp);
     Serial.println(pH);
+    Serial.println(ec);
 
-    StaticJsonDocument<200> jsonDoc;
+  }
+
+  StaticJsonDocument<200> jsonDoc;
 
     jsonDoc["nitrogen"] = N;
     jsonDoc["phosphorus"] = P;
@@ -336,7 +325,36 @@ String handleMeasurementsRequest() {
     String jsonResponse;
     serializeJson(jsonDoc, jsonResponse);
     return jsonResponse;
+}
+
+
+String sendAndReceiveHex(String hexCmd) {
+  // Send
+  int len = hexCmd.length();
+  for (int i = 0; i < len;) {
+    while (i < len && hexCmd[i] == ' ') i++;
+    if (i + 1 < len) {
+      String byteStr = hexCmd.substring(i, i + 2);
+      uint8_t byteVal = (uint8_t) strtol(byteStr.c_str(), NULL, 16);
+      Serial2.write(byteVal);
+      i += 2;
+    }
   }
+
+  unsigned long startTime = millis();
+  while (!Serial2.available() && millis() - startTime < 500) {
+    delay(10); // Wait up to 500ms
+  }
+  String responseHex = "";
+  
+  while (Serial2.available()) {
+    uint8_t byteIn = Serial2.read();
+    char hexPart[4];
+    sprintf(hexPart, "%02X ", byteIn);
+    responseHex += hexPart;
+  }
+
+  return responseHex;
 }
 
 int hexPairToDecimalByIndex(String hexString, int highIndex, int lowIndex) {
@@ -433,6 +451,7 @@ void checkWifiScanStatus() {
 
 void setup() {
   Serial.begin(115200);
+  Serial2.begin(9600, SERIAL_8N1, 16, 17); // RX2 = GPIO16, TX2 = GPIO17
 
   // Start filesystem
   if (!LittleFS.begin()) {
