@@ -24,6 +24,7 @@ char* ssid = "";
 char* password = "";
 
 // HiveMQ Cloud credentials
+// TODO: Look for the best secure vay to keep these
 const char* mqtt_server = "a6faa28a33914e9bba541e6ec9da0741.s1.eu.hivemq.cloud";
 const int mqtt_port = 8883;
 const char* mqtt_user = "boztepe";
@@ -87,7 +88,7 @@ void setupWebServer() {
     String password = jsonDoc["password"] | "";
 
     if (ssid == "") {
-      Serial.println("Burada");
+      //Serial.println("Burada");
       request->send(400, "application/json", "{\"error\":\"SSID is required\"}");
       return;
     }
@@ -259,12 +260,12 @@ String handleMeasurementsRequest() {
   Serial.println("Request Received");
 
   String requestStrings[] = {
-    "01 03 00 12 00 02 64 0E", // temp and humidity
-    "01 03 00 15 00 00 01 95", // EC
-    "01 03 00 06 00 01 64 0B", // pH
-    "01 03 00 1E 00 01 E4 0C", // N
-    "01 03 00 1F 00 01 B5 CC", // P
-    "01 03 00 20 00 01 85 C0", // K
+    "010300120002640E", // temp and humidity
+    "0103001500000195", // EC
+    "010300060001640B", // pH
+    "0103001E0001E40C", // N
+    "0103001F0001B5CC", // P
+    "01030020000185C0", // K
   };
 
   double temp = 0.0;
@@ -329,30 +330,64 @@ String handleMeasurementsRequest() {
 
 
 String sendAndReceiveHex(String hexCmd) {
-  // Send
-  int len = hexCmd.length();
-  for (int i = 0; i < len;) {
-    while (i < len && hexCmd[i] == ' ') i++;
-    if (i + 1 < len) {
-      String byteStr = hexCmd.substring(i, i + 2);
-      uint8_t byteVal = (uint8_t) strtol(byteStr.c_str(), NULL, 16);
-      Serial2.write(byteVal);
-      i += 2;
-    }
-  }
 
-  unsigned long startTime = millis();
-  while (!Serial2.available() && millis() - startTime < 500) {
-    delay(10); // Wait up to 500ms
-  }
+  for (int i = 0; i < hexCmd.length();) {
+  //   while (i <a.length()  && a[i] == ' ') i++; // Skip spaces
+     if (i + 1 < hexCmd.length()) {
+       String byteStr = hexCmd.substring(i, i + 2);
+       uint8_t byteVal = (uint8_t) strtol(byteStr.c_str(), NULL, 16);
+       Serial2.write(byteVal);
+      
+      char hexByte[4];
+      sprintf(hexByte, "%02X ", byteVal);
+      Serial.print(hexByte);
+
+       // Print sent byte in hex for debugging
+
+       i += 2;
+     }
+   }
+   Serial.println();
+
+  // Serial2.write(byteVal);
+  delay(100);
+
+  // char hexByte[4];
+  // sprintf(hexByte, "%02X ", byteVal);
+  // Serial.print(hexByte);
   String responseHex = "";
-  
+
   while (Serial2.available()) {
     uint8_t byteIn = Serial2.read();
     char hexPart[4];
     sprintf(hexPart, "%02X ", byteIn);
     responseHex += hexPart;
   }
+  Serial.println("Response: " + responseHex);
+
+  // // Send
+  // int len = hexCmd.length();
+  // for (int i = 0; i < len;) {
+  //   if (i + 1 < len) {
+  //     String byteStr = hexCmd.substring(i, i + 2);
+  //     uint8_t byteVal = (uint8_t) strtol(byteStr.c_str(), NULL, 16);
+  //     Serial2.write(byteVal);
+  //     i += 2;
+  //   }
+  // }
+
+  // // unsigned long startTime = millis();
+  // // while (!Serial2.available() && millis() - startTime < 500) {
+  // //   delay(10); // Wait up to 500ms
+  // // }
+  // String responseHex = "";
+  
+  // while (Serial2.available()) {
+  //   uint8_t byteIn = Serial2.read();
+  //   char hexPart[4];
+  //   sprintf(hexPart, "%02X ", byteIn);
+  //   responseHex += hexPart;
+  // }
 
   return responseHex;
 }
