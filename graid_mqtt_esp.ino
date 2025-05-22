@@ -261,11 +261,9 @@ String handleMeasurementsRequest() {
 
   String requestStrings[] = {
     "010300120002640E", // temp and humidity
-    "0103001500000195", // EC
+    "01030015000195CE", // EC
     "010300060001640B", // pH
-    "0103001E0001E40C", // N
-    "0103001F0001B5CC", // P
-    "01030020000185C0", // K
+    "0103001E000365CD" // NPK
   };
 
   double temp = 0.0;
@@ -276,31 +274,29 @@ String handleMeasurementsRequest() {
   double P = 0.0;
   double K = 0.0;  
 
-  for (int stringIndex = 0; stringIndex < 6; stringIndex++) {
+  for (int stringIndex = 0; stringIndex < 4; stringIndex++) {
     
     String responseHex = sendAndReceiveHex(requestStrings[stringIndex]);
     Serial.println("Response: " + responseHex);
 
-    if (stringIndex == 0) // Temp ve Humidity (/10)
-    {
-      Serial.println("Debug6");
-      temp = ((double) hexPairToDecimalByIndex(responseHex, 3, 4)) / 10.0;
-      humidity = ((double) hexPairToDecimalByIndex(responseHex, 5, 6)) / 10.0;
-    }
-    else if (stringIndex == 1) { // EC
-      ec = (double) hexPairToDecimalByIndex(responseHex, 3, 4);
-    }
-    else if (stringIndex == 2) { // pH (/100)
-      pH = ((double) hexPairToDecimalByIndex(responseHex, 3, 4)) / 100.0;
-    }
-    else if (stringIndex == 3) { // Nitrogen
-      N = (double) hexPairToDecimalByIndex(responseHex, 3, 4);
-    }
-    else if (stringIndex == 4) { // Phosphorus
-      P = (double) hexPairToDecimalByIndex(responseHex, 3, 4);
-    }
-    else if (stringIndex == 5) { // Potassium
-      K = (double) hexPairToDecimalByIndex(responseHex, 3, 4);
+    if (responseHex.length() > 0){
+      if (stringIndex == 0) // Temp ve Humidity (/10)
+      {
+        Serial.println("Debug6");
+        temp = ((double) hexPairToDecimalByIndex(responseHex, 5, 6)) / 10.0;
+        humidity = ((double) hexPairToDecimalByIndex(responseHex, 3, 4)) / 10.0;
+      }
+      else if (stringIndex == 1) { // EC
+        ec = (double) hexPairToDecimalByIndex(responseHex, 3, 4);
+      }
+      else if (stringIndex == 2) { // pH (/100)
+        pH = ((double) hexPairToDecimalByIndex(responseHex, 3, 4)) / 100.0;
+      }
+      else if (stringIndex == 3) { // Nitrogen Phosphorus Potassium
+        N = (double) hexPairToDecimalByIndex(responseHex, 3, 4);
+        P = (double) hexPairToDecimalByIndex(responseHex, 5, 6);
+        K = (double) hexPairToDecimalByIndex(responseHex, 7, 8);
+      }
     }
 
     Serial.println(N);
@@ -350,7 +346,7 @@ String sendAndReceiveHex(String hexCmd) {
    Serial.println();
 
   // Serial2.write(byteVal);
-  delay(100);
+  delay(200);
 
   // char hexByte[4];
   // sprintf(hexByte, "%02X ", byteVal);
@@ -363,7 +359,6 @@ String sendAndReceiveHex(String hexCmd) {
     sprintf(hexPart, "%02X ", byteIn);
     responseHex += hexPart;
   }
-  Serial.println("Response: " + responseHex);
 
   // // Send
   // int len = hexCmd.length();
